@@ -15,7 +15,7 @@ class VectorStore:
         if not os.environ.get("GOOGLE_API_KEY"):
             raise ValueError("GOOGLE_API_KEY environment variable not set.")
             
-        embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+        embedding_model = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
         
         # InMemoryVectorStore is initialized with the embedding function and can be empty.
         self.vector_store = InMemoryVectorStore.from_texts(
