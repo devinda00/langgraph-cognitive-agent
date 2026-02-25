@@ -23,10 +23,11 @@ async def generate_node(state: AgentState) -> AgentState:
     print("---MIND LOOP: Generate---")
     prompt = f"""
 You are the 'Generate' component of an AI's Mind. 
-Your task is to rephrase the user's last message into a clear, actionable internal question.
+Your task is to rephrase the user's last message and current knowledge base into a clear, actionable internal question.
 This question will be used by the 'Think' component to decide on the next step.
 
 User's last message: "{state['messages'][-1].content}"
+Current knowledge base: "{state['knowledge_base']}"
 
 Generated Internal Question:
 """
