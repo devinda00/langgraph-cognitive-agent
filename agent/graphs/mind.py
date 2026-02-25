@@ -11,7 +11,7 @@ from agent.graphs.brain import create_brain_graph
 
 # --- LLMs and Tools ---
 mind_llm = ChatGoogleGenerativeAI(
-    model="gemini-3.1-flash-latest",
+    model="gemini-2.5-flash-lite",
     temperature=1,
     convert_system_message_to_human=True
 ).with_structured_output(MindAction)
