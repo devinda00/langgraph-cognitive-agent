@@ -1,5 +1,5 @@
 # langgraph_cognitive_arch/agent/permanent_knowledge.py
-from langchain_community.vectorstores.inmemory import MemoryVectorStore
+from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.schema import Document
 import os
@@ -7,7 +7,7 @@ import os
 class VectorStore:
     """
     A wrapper for a lightweight, in-memory vector store to manage Permanent Knowledge.
-    This version uses LangChain's MemoryVectorStore to avoid heavy dependencies like FAISS.
+    This version uses LangChain's InMemoryVectorStore to avoid heavy dependencies like FAISS.
     """
     def __init__(self):
         print("---INITIALIZING Permanent Knowledge (In-Memory Vector DB with Google Embeddings)---")
@@ -17,8 +17,8 @@ class VectorStore:
             
         embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
         
-        # MemoryVectorStore is initialized with the embedding function and can be empty.
-        self.vector_store = MemoryVectorStore.from_texts(
+        # InMemoryVectorStore is initialized with the embedding function and can be empty.
+        self.vector_store = InMemoryVectorStore.from_texts(
             texts=[], # Start with an empty store
             embedding=embedding_model
         )
