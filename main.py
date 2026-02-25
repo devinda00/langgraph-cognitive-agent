@@ -4,14 +4,12 @@ from typing import TypedDict, Annotated, List
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langgraph.graph import StateGraph, END
-from langchain_groq import ChatGroq
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
 
 # --- Load API Keys ---
-# Create a .env file in this directory and add your keys
-# OPENAI_API_KEY="sk-..."
-# GROQ_API_KEY="gsk_..."
+# Create a .env file in this directory and add your key
+# GOOGLE_API_KEY="..."
 load_dotenv()
 
 # --- 1. Define the State for our Graph ---
@@ -38,16 +36,17 @@ class MindDecision(BaseModel):
 # --- 3. Define the Models: Mind and Brain ---
 
 # The MIND: Fast, reactive, and responsible for triage.
-# We use Groq's Llama3-8b for its incredible speed.
-mind_llm = ChatGroq(
-    model="llama3-8b-8192",
+# We use Gemini 1.5 Flash for its speed and multimodal capabilities.
+mind_llm = ChatGoogleGenerativeAI(
+    model="gemini-1.5-flash",
     temperature=0,
+    convert_system_message_to_human=True # Helps with structured output
 ).with_structured_output(MindDecision)
 
 # The BRAIN: Powerful, deliberative, and used for complex reasoning.
-# We use OpenAI's GPT-4o for its advanced capabilities.
-brain_llm = ChatOpenAI(
-    model="gpt-4o",
+# We use Gemini 1.5 Pro for its advanced capabilities.
+brain_llm = ChatGoogleGenerativeAI(
+    model="gemini-1.5-pro",
     temperature=0
 )
 
