@@ -1,157 +1,136 @@
 # langgraph_cognitive_arch/agent/graphs/mind.py
+# This file is now the main entry point for the entire agent graph.
 from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolNode
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from agent.state import AgentState, Thought
+from agent.state import AgentState, MindAction
+from agent.tools.brain_tools import web_search_mind
+from agent.graphs.brain import create_brain_graph
 
-# LLM for the Mind's internal processes
+# --- LLMs and Tools ---
 mind_llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash-lite",
     temperature=0,
     convert_system_message_to_human=True
-)
+).with_structured_output(MindAction)
+
+mind_tool_node = ToolNode([web_search_mind])
+brain_sub_graph = create_brain_graph() # The entire brain is a "tool" for the mind
 
 # --- Nodes for the Mind's Cognitive Loop ---
 
-async def generate_node(state: AgentState) -> AgentState:
+async def load_node(state: AgentState) -> dict:
     """
-    Step 1 (and loop entry): GENERATE
-    Generates a clear internal question based on the latest messages and knowledge.
+    Step 1: LOAD
+    The entry point for user interaction. It simply passes the state through.
+    The user's message is already in state['messages'].
+    """
+    print("---MIND LOOP: Load---")
+    # In a real "always on" system, this could check for new input.
+    # Here, it's the start of the processing chain for a new user message.
+    return {}
+
+async def generate_node(state: AgentState) -> dict:
+    """
+    Step 2: GENERATE
+    Generates a clear internal question from the current context.
     """
     print("---MIND LOOP: Generate---")
-    
-    # Format the knowledge base for inclusion in the prompt
-    kb_string = "\n".join([f"- {key}: {value}" for key, value in state['knowledge_base'].items()])
-    if not kb_string:
-        kb_string = "is empty."
+    # This node is conceptually important but can be combined with 'think' for efficiency.
+    # For now, we'll pass its role to the think node.
+    return {}
 
-    prompt = f"""
-You are the 'Generate' component of an AI's Mind. 
-Your task is to rephrase the user's last message and current knowledge base into a clear, actionable internal question.
-The last message might be from the user or context from the knowledge base.
-
-User's last message: "{state['messages'][-1].content}"
-The Temp Knowledge base currently {kb_string}
-
-Generated Internal Question:
-"""
-    response = await mind_llm.ainvoke(prompt)
-    return {"generated_question": response.content}
-
-async def think_node(state: AgentState) -> AgentState:
+async def think_node(state: AgentState) -> dict:
     """
-    Step 2: THINK
-    Analyzes the question and decides to respond, escalate, or retrieve knowledge.
+    Step 3: THINK
+    The core of the Mind. It analyzes the situation and decides on an action.
     """
     print("---MIND LOOP: Think---")
     prompt = f"""
-You are the 'Think' component of an AI's Mind. Your task is to analyze the internal question and the state of the temp knowledge base, then decide on the next step.
-
+You are the "Mind," a fast, efficient AI controller. Your job is to analyze the user's request and decide the next action.
 You have three choices:
-1.  `retrieve_knowledge`: The question requires information that might be in the temp knowledge base, but hasn't been accessed yet. Use this if the user asks a follow-up or refers to something that was said before.
-2.  `respond`: The question is simple and can be answered directly with the current information.
-3.  `escalate`: The question is complex and requires the Brain (e.g., multi-step reasoning, planning, coding).
+1.  `respond_to_user`: The request is simple, conversational, or has been fully answered. Provide a direct response.
+2.  `use_mind_tool`: The request requires a quick piece of external information. Use the web search tool.
+3.  `call_brain`: The request is complex and requires deep reasoning, planning, or access to long-term memory.
 
-Internal Question: "{state['generated_question']}"
-Temp Knowledge Keys: {list(state['knowledge_base'].keys())}
+Current Conversation:
+{state['messages']}
 
-Your thought process and final decision:
+Temp Knowledge:
+{state['temp_knowledge']}
+
+Based on this, what is your reasoning and the next action to take?
 """
-    structured_llm = mind_llm.with_structured_output(Thought)
-    thought = await structured_llm.ainvoke(prompt)
-    
-    escalate = thought.decision == 'escalate'
-    print(f"---MIND Thought: {thought.reasoning} -> Decision: {thought.decision}---")
-    
-    return {"thought": thought, "escalate_to_brain": escalate}
+    mind_action = await mind_llm.ainvoke(prompt)
+    print(f"---MIND Thought: {mind_action.reasoning} -> Action: {mind_action.action}---")
+    return {"mind_action": mind_action}
 
-async def retrieve_knowledge_node(state: AgentState) -> AgentState:
+async def update_node(state: AgentState, action_result: dict) -> dict:
     """
-    Step 2.5 (Optional): RETRIEVE KNOWLEDGE
-    Retrieves information from the temporary knowledge base (dict) and adds it to the message history for context.
+    Step 5: UPDATE
+    Updates the temporary knowledge base with the results of the last action.
     """
-    print("---MIND LOOP: Retrieve Knowledge---")
-    query = state['thought'].knowledge_query
-    if query and query in state['knowledge_base']:
-        retrieved_data = state['knowledge_base'][query]
-        context_message = HumanMessage(
-            content=f"Context from Temp Knowledge for '{query}': {retrieved_data}",
-            name="KnowledgeBase"
-        )
-        print(f"---MIND: Found knowledge for '{query}': {retrieved_data}---")
-    else:
-        context_message = HumanMessage(
-            content=f"Could not find information for '{query}' in Temp Knowledge.",
-            name="KnowledgeBase"
-        )
-        print(f"---MIND: No knowledge found for '{query}'---")
-        
-    return {"messages": [context_message]}
+    print("---MIND LOOP: Update---")
+    last_message = state['messages'][-1]
+    # Here we would add logic to distill and save important info to temp_knowledge
+    # For now, we'll just log that we passed through the update step.
+    return {}
 
-async def action_node(state: AgentState) -> AgentState:
-    """
-    Step 3: ACTION / RESPOND
-    Formulates a simple, direct response to the user.
-    """
-    print("---MIND LOOP: Respond---")
-    prompt = f"""
-You are the 'Action' component of an AI's Mind. Your task is to provide a concise and helpful answer to the internal question. If the question is conversational, just respond naturally.
+# --- Action-related nodes ---
 
-Internal Question: "{state['generated_question']}"
+async def respond_to_user_node(state: AgentState) -> dict:
+    """The node that formulates and returns the final response to the user."""
+    return {"messages": [AIMessage(content=state['mind_action'].tool_input, name="Mind")]}
 
-Answer:
-"""
-    response = await mind_llm.ainvoke(prompt)
-    
-    # Let's also update our temp knowledge with our response
-    new_knowledge = state['knowledge_base']
-    new_knowledge[state['generated_question']] = response.content
-    
-    return {
-        "messages": [AIMessage(content=response.content, name="Mind")],
-        "knowledge_base": new_knowledge
-    }
+# --- Main Conditional Router ---
 
-# --- Conditional Edge for the Mind's Graph ---
+def route_action(state: AgentState) -> str:
+    """The main router for the entire agent, driven by the Mind's decision."""
+    action = state['mind_action'].action
+    if action == 'call_brain':
+        return 'brain'
+    elif action == 'use_mind_tool':
+        return 'mind_tools'
+    else: # respond_to_user
+        return 'respond_to_user'
 
-def route_from_think(state: AgentState) -> str:
-    """Routes from the 'think' node to the appropriate next step."""
-    decision = state["thought"].decision
-    if decision == 'retrieve_knowledge':
-        return "retrieve_knowledge"
-    if decision == 'respond':
-        return "respond"
-    return END # 'escalate' decision ends the sub-graph
+# --- Define and Compile the Unified Agent Graph ---
 
-# --- Define and Compile the Mind's Sub-Graph ---
-
-def create_mind_graph():
-    """Factory function to create the mind's cognitive loop sub-graph."""
+def create_agent_graph():
+    """This function now creates the entire, unified agent graph."""
     workflow = StateGraph(AgentState)
-    
-    workflow.add_node("generate", generate_node)
+
+    workflow.add_node("load", load_node)
     workflow.add_node("think", think_node)
-    workflow.add_node("retrieve_knowledge", retrieve_knowledge_node)
-    workflow.add_node("respond", action_node)
     
-    workflow.set_entry_point("generate")
+    # Action nodes
+    workflow.add_node("mind_tools", mind_tool_node)
+    workflow.add_node("brain", brain_sub_graph) # The brain is a node
+    workflow.add_node("respond_to_user", respond_to_user_node)
+
+    workflow.add_node("update", update_node)
+
+    workflow.set_entry_point("load")
+    workflow.add_edge("load", "think")
     
-    workflow.add_edge("generate", "think")
-    
-    # The new 3-way decision point
+    # The Action router
     workflow.add_conditional_edges(
         "think",
-        route_from_think,
+        route_action,
         {
-            "retrieve_knowledge": "retrieve_knowledge",
-            "respond": "respond",
-            END: END,
-        },
+            "mind_tools": "mind_tools",
+            "brain": "brain",
+            "respond_to_user": "respond_to_user"
+        }
     )
     
-    # The new loop: after retrieving knowledge, we go back to generate a new question
-    workflow.add_edge("retrieve_knowledge", "generate")
-    workflow.add_edge("respond", END)
-    
+    # After an action, update and loop back to think
+    workflow.add_edge("mind_tools", "update")
+    workflow.add_edge("brain", "update")
+    workflow.add_edge("update", "think") # The main loop!
+
+    workflow.add_edge("respond_to_user", END)
+
     return workflow.compile()

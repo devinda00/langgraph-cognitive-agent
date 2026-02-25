@@ -1,27 +1,31 @@
 # langgraph_cognitive_arch/agent/state.py
-from typing import TypedDict, Annotated, List, Optional, Dict
+from typing import TypedDict, Annotated, List, Optional, Dict, Any
 from langchain_core.messages import BaseMessage
 from langchain_core.pydantic_v1 import BaseModel, Field
+from agent.permanent_knowledge import VectorStore
 
-class Thought(BaseModel):
-    """
-    The output of the 'think' node. It contains the reasoning process
-    and a decision on how to proceed.
-    """
+class MindAction(BaseModel):
+    """The decision and action from the Mind's think node."""
     reasoning: str = Field(description="The chain of thought leading to the decision.")
-    decision: str = Field(description="The decision made. Can be 'respond', 'escalate', or 'retrieve_knowledge'.")
-    knowledge_query: Optional[str] = Field(description="If the decision is 'retrieve_knowledge', this is the key to look for in the temp knowledge base. Otherwise, this is empty.")
+    action: str = Field(description="The chosen action. Must be one of: 'respond_to_user', 'call_brain', 'use_mind_tool'.")
+    tool_input: Optional[str] = Field(description="The input for the chosen tool, if any.")
+
+class BrainAction(BaseModel):
+    """The decision and action from the Brain's think node."""
+    reasoning: str = Field(description="The chain of thought leading to the decision.")
+    action: str = Field(description="The chosen action. Must be one of: 'access_temp_knowledge', 'access_permanent_knowledge', 'write_to_permanent_knowledge', 'respond_to_mind'.")
+    tool_input: Optional[str] = Field(description="The input for the chosen tool, if any.")
 
 class AgentState(TypedDict):
     """The state of our cognitive agent."""
     messages: Annotated[List[BaseMessage], lambda x, y: x + y]
     
+    # Represents "Temp Knowledge" as a Python dictionary
+    temp_knowledge: Dict[str, Any]
+    
+    # Handle to the vector store for permanent knowledge
+    permanent_knowledge: VectorStore
+
     # Intermediate products of the cognitive loops
-    generated_question: str
-    thought: Thought
-    
-    # This field will signal escalation from the Mind to the Router
-    escalate_to_brain: bool
-    
-    # Represents "Temp Knowledge", now implemented as a Python dictionary
-    knowledge_base: Dict
+    # These will be specific to either the Mind or Brain's internal state
+    # We will pass them explicitly between nodes instead of putting them all here.

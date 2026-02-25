@@ -2,91 +2,102 @@
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
-from agent.state import AgentState, Thought
-from agent.tools.web_search import web_search
+from agent.state import AgentState, BrainAction
+from agent.tools.brain_tools import (
+    access_temp_knowledge, 
+    access_permanent_knowledge, 
+    write_to_permanent_knowledge
+)
 
-# LLM for the Brain's internal processes
+# --- LLMs and Tools ---
 brain_llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-pro",
     temperature=0,
     convert_system_message_to_human=True
-)
-# Bind the web search tool to the Brain LLM
-brain_llm_with_tools = brain_llm.bind_tools([web_search])
+).with_structured_output(BrainAction)
 
-# Tool node for executing actions
-tool_node = ToolNode([web_search])
+brain_tools = [access_temp_knowledge, access_permanent_knowledge, write_to_permanent_knowledge]
+brain_tool_node = ToolNode(brain_tools)
 
 # --- Nodes for the Brain's Cognitive Loop ---
 
-async def generate_node(state: AgentState) -> AgentState:
-    """
-    Step 1: GENERATE
-    Generates a plan to answer the user's query. It can choose to use a tool.
-    This node is the starting point and the re-evaluation point after each tool use.
-    """
+async def generate_node(state: AgentState) -> dict:
+    """Step 1: GENERATE. Generates questions about the task."""
     print("---BRAIN LOOP: Generate---")
-    
-    # The first message is the original user query. Subsequent messages can be tool outputs.
-    response = await brain_llm_with_tools.ainvoke(state["messages"])
-    
-    # The 'generate' node in the brain directly produces the action/response
-    return {"messages": [response]}
+    # In this implementation, Generate & Think are combined for efficiency
+    return {}
 
-async def update_node(state: AgentState) -> AgentState:
-    """
-    Step 2: UPDATE (Implicit after Action/Tool Call)
-    The ToolNode implicitly handles this. It takes the tool calls from the last AIMessage,
-    executes them, and appends the ToolMessage results to the state.
-    This function's logic is therefore handled by the combination of the 'action' (ToolNode)
-    and the graph's persistence of state. After this, we loop back to 'generate'.
-    """
-    # This node is conceptually important but functionally handled by the ToolNode
-    # and the graph structure. We don't need to add explicit logic here.
-    # The loop back to 'generate' is the key.
-    pass
+async def think_node(state: AgentState) -> dict:
+    """Step 2: THINK. Forms a plan and decides on the next action."""
+    print("---BRAIN LOOP: Think---")
+    prompt = f"""
+You are the "Brain," a deep reasoning engine. Your task is to solve a complex problem.
+Analyze the user's request and the current state of knowledge to decide on the next action.
 
-# --- Conditional Edge for the Brain's Graph ---
+You have the following actions available:
+1.  `access_temp_knowledge`: Retrieve information from the short-term working memory.
+2.  `access_permanent_knowledge`: Recall long-term memories from the vector store.
+3.  `write_to_permanent_knowledge`: Distill and save a new insight to long-term memory.
+4.  `respond_to_mind`: You have solved the problem. Formulate a final answer to send back to the Mind.
 
-def should_continue_or_finish(state: AgentState) -> str:
-    """
-    After the 'generate' node, this decides if we need to call a tool or if we are done.
-    If the last message from the LLM has tool calls, we continue to the 'action' step.
-    Otherwise, we finish.
-    """
-    last_message = state["messages"][-1]
-    if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
-        return "finish"
-    return "continue"
+Current Conversation History:
+{state['messages']}
 
+Temp Knowledge:
+{state['temp_knowledge']}
+
+Based on this, what is your reasoning and the next action to take?
+"""
+    brain_action = await brain_llm.ainvoke(prompt)
+    print(f"---BRAIN Thought: {brain_action.reasoning} -> Action: {brain_action.action}---")
+    return {"brain_action": brain_action}
+
+async def update_node(state: AgentState) -> dict:
+    """Step 4: UPDATE. The results of the action are implicitly added to state by the ToolNode."""
+    print("---BRAIN LOOP: Update---")
+    return {}
+
+async def respond_to_mind_node(state: AgentState) -> dict:
+    """The final node, packaging the result for the Mind."""
+    print("---BRAIN LOOP: Respond to Mind---")
+    return {"messages": [AIMessage(content=state['brain_action'].tool_input, name="Brain")]}
+
+# --- Conditional Router for the Brain ---
+
+def route_brain_action(state: AgentState) -> str:
+    action = state['brain_action'].action
+    if action == 'respond_to_mind':
+        return 'respond_to_mind'
+    else: # Any of the tool-using actions
+        return 'action'
 
 # --- Define and Compile the Brain's Sub-Graph ---
 
 def create_brain_graph():
-    """
-    Factory function to create the brain's cognitive loop sub-graph,
-    which follows the pattern: Generate -> Action -> Update -> Generate ...
-    """
     workflow = StateGraph(AgentState)
     
-    workflow.add_node("generate", generate_node)
-    workflow.add_node("action", tool_node) # Action is executing the tool
+    workflow.add_node("think", think_node)
+    workflow.add_node("action", brain_tool_node)
+    workflow.add_node("update", update_node)
+    workflow.add_node("respond_to_mind", respond_to_mind_node)
     
-    workflow.set_entry_point("generate")
+    workflow.set_entry_point("think")
     
     workflow.add_conditional_edges(
-        "generate",
-        should_continue_or_finish,
+        "think",
+        route_brain_action,
         {
-            "continue": "action",
-            "finish": END,
-        },
+            "action": "action",
+            "respond_to_mind": "respond_to_mind"
+        }
     )
     
-    # This is the crucial loop from your diagram: Action -> Update -> Generate
-    # The ToolNode ('action') implicitly updates state, and we explicitly loop back to 'generate'
-    workflow.add_edge("action", "generate")
+    # The crucial loop: After acting, update, then think again.
+    workflow.add_edge("action", "update")
+    workflow.add_edge("update", "think")
+
+    workflow.add_edge("respond_to_mind", END)
     
     return workflow.compile()
