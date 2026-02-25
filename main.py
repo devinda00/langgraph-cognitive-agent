@@ -1,6 +1,10 @@
-# langgraph_cognitive_arch/main.py
+# main.py
 import asyncio
+from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, AIMessage
+
+# Load environment variables from .env file before anything else
+load_dotenv()
 
 from agent.graphs.mind import create_agent_graph
 from agent.permanent_knowledge import PERMANENT_KNOWLEDGE
