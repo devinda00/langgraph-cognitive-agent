@@ -1,34 +1,26 @@
 # langgraph_cognitive_arch/agent/permanent_knowledge.py
-import faiss
-from langchain.docstore.in_memory import InMemoryDocstore
-from langchain_community.vectorstores.faiss import FAISS
+from langchain_community.vectorstores.memory import MemoryVectorStore
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.schema import Document
 import os
 
 class VectorStore:
-    """A wrapper for a FAISS vector store to manage Permanent Knowledge."""
+    """
+    A wrapper for a lightweight, in-memory vector store to manage Permanent Knowledge.
+    This version uses LangChain's MemoryVectorStore to avoid heavy dependencies like FAISS.
+    """
     def __init__(self):
-        print("---INITIALIZING Permanent Knowledge (Vector DB with Google Embeddings)---")
+        print("---INITIALIZING Permanent Knowledge (In-Memory Vector DB with Google Embeddings)---")
         
-        # Ensure the API key is available
         if not os.environ.get("GOOGLE_API_KEY"):
             raise ValueError("GOOGLE_API_KEY environment variable not set.")
             
         embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
         
-        # Dimension of the Google embedding model
-        embedding_size = 768 
-        index = faiss.IndexFlatL2(embedding_size)
-        
-        # In-memory document store
-        docstore = InMemoryDocstore({})
-        
-        self.vector_store = FAISS(
-            embedding_function=embedding_model,
-            index=index,
-            docstore=docstore,
-            index_to_docstore_id={}
+        # MemoryVectorStore is initialized with the embedding function and can be empty.
+        self.vector_store = MemoryVectorStore.from_texts(
+            texts=[], # Start with an empty store
+            embedding=embedding_model
         )
 
     def add_memory(self, content: str, metadata: dict = None):
