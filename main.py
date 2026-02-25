@@ -20,7 +20,8 @@ async def run_agent():
             "messages": [HumanMessage(content=user_input)],
             "generated_question": "",
             "thought": None,
-            "escalate_to_brain": False
+            "escalate_to_brain": False,
+            "knowledge_base": "" # Initialize empty knowledge base
         }
         
         final_state = None

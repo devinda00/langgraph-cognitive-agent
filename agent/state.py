@@ -22,3 +22,6 @@ class AgentState(TypedDict):
     
     # This field will signal escalation from the Mind to the Router
     escalate_to_brain: bool
+    
+    # Represents the "Temp Knowledge" from your diagram
+    knowledge_base: str
