@@ -21,7 +21,7 @@ class GeneratedQuestions(BaseModel):
 # --- LLMs and Tools ---
 brain_llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-pro",
-    temperature=0,
+    temperature=1,
     convert_system_message_to_human=True
 )
 
