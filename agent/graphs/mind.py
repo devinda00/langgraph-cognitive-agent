@@ -131,6 +131,6 @@ def create_agent_graph():
     workflow.add_edge("brain", "update")
     workflow.add_edge("update", "think") # The main loop!
 
-    workflow.add_edge("respond_to_user", END)
+    workflow.add_edge("respond_to_user", "update")
 
     return workflow.compile()
