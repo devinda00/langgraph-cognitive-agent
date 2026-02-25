@@ -38,7 +38,7 @@ class MindDecision(BaseModel):
 # The MIND: Fast, reactive, and responsible for triage.
 # We use Gemini 1.5 Flash for its speed and multimodal capabilities.
 mind_llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash",
+    model="gemini-2.5-flash-lite",
     temperature=0,
     convert_system_message_to_human=True # Helps with structured output
 ).with_structured_output(MindDecision)
@@ -46,7 +46,7 @@ mind_llm = ChatGoogleGenerativeAI(
 # The BRAIN: Powerful, deliberative, and used for complex reasoning.
 # We use Gemini 1.5 Pro for its advanced capabilities.
 brain_llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-pro",
+    model="gemini-2.5-pro",
     temperature=0
 )
 
