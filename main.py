@@ -9,30 +9,32 @@ async def run_agent():
     app = create_agent_graph()
     
     print("Cognitive Agent is running. Type 'exit' to end the conversation.")
+    print("Try a simple question like 'hello' and a complex one like 'what's the weather in Paris?'")
     while True:
         user_input = input("You: ")
         if user_input.lower() == 'exit':
             break
         
-        # We start the conversation with the user's message
-        initial_state = {"messages": [HumanMessage(content=user_input)]}
+        # We start the conversation with the user's message and default values
+        initial_state = {
+            "messages": [HumanMessage(content=user_input)],
+            "generated_question": "",
+            "thought": None,
+            "escalate_to_brain": False
+        }
         
         final_state = None
         # The 'stream' method lets us see the output from each step
         async for step in app.astream(initial_state):
             step_name = list(step.keys())[0]
-            print(f"\n---> Executing step: {step_name} <---")
-            
-            if "messages" in step[step_name]:
-                 for message in step[step_name]["messages"]:
-                    if isinstance(message, AIMessage) and step_name != "mind":
-                        print(f"   LLM ({message.name}): {message.content}")
-
-            final_state = step
+            print(f"\n---> Executing Router Step: {step_name} <---")
+            final_state = step[step_name]
 
         print("\n---FINAL RESPONSE---")
-        final_message = final_state[list(final_state.keys())[0]]["messages"][-1]
-        print(f"{final_message.name}: {final_message.content}")
+        final_message = final_state["messages"][-1]
+        # Ensure final_message is not a ToolMessage before printing
+        if isinstance(final_message, AIMessage):
+            print(f"{final_message.name}: {final_message.content}")
         print("\n" + "="*50 + "\n")
 
 if __name__ == "__main__":

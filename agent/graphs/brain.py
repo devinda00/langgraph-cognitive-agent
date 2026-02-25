@@ -1,84 +1,92 @@
 # langgraph_cognitive_arch/agent/graphs/brain.py
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from agent.state import AgentState
+from agent.state import AgentState, Thought
 from agent.tools.web_search import web_search
 
-# The BRAIN: Powerful, deliberative, and used for complex reasoning.
+# LLM for the Brain's internal processes
 brain_llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-pro",
-    temperature=0
-).bind_tools([web_search]) # Bind the tool for the Brain to use
+    temperature=0,
+    convert_system_message_to_human=True
+)
+# Bind the web search tool to the Brain LLM
+brain_llm_with_tools = brain_llm.bind_tools([web_search])
 
-# The tool node for executing the web search tool
+# Tool node for executing actions
 tool_node = ToolNode([web_search])
 
-# --- Nodes for the Brain's Sub-Graph ---
+# --- Nodes for the Brain's Cognitive Loop ---
 
-async def brain_planner_node(state: AgentState) -> AgentState:
+async def generate_node(state: AgentState) -> AgentState:
     """
-    This is the core reasoning node for the Brain.
-    It receives the task and decides whether to use a tool or to respond directly.
+    Step 1: GENERATE
+    Generates a plan to answer the user's query. It can choose to use a tool.
+    This node is the starting point and the re-evaluation point after each tool use.
     """
-    print("---SUB-GRAPH (BRAIN): Generating plan---")
-    response = await brain_llm.ainvoke(state["messages"])
+    print("---BRAIN LOOP: Generate---")
+    
+    # The first message is the original user query. Subsequent messages can be tool outputs.
+    response = await brain_llm_with_tools.ainvoke(state["messages"])
+    
+    # The 'generate' node in the brain directly produces the action/response
     return {"messages": [response]}
 
-def should_continue_tool_use(state: AgentState) -> str:
+async def update_node(state: AgentState) -> AgentState:
     """
-    Conditional router for the Brain's ReAct loop.
-    Decides if another tool call is needed.
+    Step 2: UPDATE (Implicit after Action/Tool Call)
+    The ToolNode implicitly handles this. It takes the tool calls from the last AIMessage,
+    executes them, and appends the ToolMessage results to the state.
+    This function's logic is therefore handled by the combination of the 'action' (ToolNode)
+    and the graph's persistence of state. After this, we loop back to 'generate'.
+    """
+    # This node is conceptually important but functionally handled by the ToolNode
+    # and the graph structure. We don't need to add explicit logic here.
+    # The loop back to 'generate' is the key.
+    pass
+
+# --- Conditional Edge for the Brain's Graph ---
+
+def should_continue_or_finish(state: AgentState) -> str:
+    """
+    After the 'generate' node, this decides if we need to call a tool or if we are done.
+    If the last message from the LLM has tool calls, we continue to the 'action' step.
+    Otherwise, we finish.
     """
     last_message = state["messages"][-1]
-    if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
-        # No tool calls, so we're done
-        return "end"
-    else:
-        # There's a tool call, so continue the loop
-        return "continue"
+    if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
+        return "finish"
+    return "continue"
 
-async def brain_synthesizer_node(state: AgentState) -> AgentState:
-    """
-    After all tool calls are done, this node synthesizes the final answer.
-    """
-    print("---SUB-GRAPH (BRAIN): Synthesizing final answer---")
-    synthesizer_prompt = (
-        "You are a helpful assistant. All the necessary information from tool calls"
-        " is now available. Synthesize this information to provide a final, comprehensive"
-        " answer to the user's original query."
-    )
-    # Add the synthesizer prompt to the message history
-    all_messages = state["messages"] + [("user", synthesizer_prompt)]
-    
-    response = await brain_llm.ainvoke(all_messages)
-    # We remove the tool-calling info from the final response for cleanliness
-    response.tool_calls = [] 
-    return {"messages": [response]}
 
 # --- Define and Compile the Brain's Sub-Graph ---
 
 def create_brain_graph():
-    """Factory function to create the brain's sub-graph."""
+    """
+    Factory function to create the brain's cognitive loop sub-graph,
+    which follows the pattern: Generate -> Action -> Update -> Generate ...
+    """
     workflow = StateGraph(AgentState)
     
-    workflow.add_node("planner", brain_planner_node)
-    workflow.add_node("tools", tool_node)
-    workflow.add_node("synthesizer", brain_synthesizer_node)
+    workflow.add_node("generate", generate_node)
+    workflow.add_node("action", tool_node) # Action is executing the tool
     
-    workflow.set_entry_point("planner")
+    workflow.set_entry_point("generate")
     
     workflow.add_conditional_edges(
-        "planner",
-        should_continue_tool_use,
+        "generate",
+        should_continue_or_finish,
         {
-            "continue": "tools",
-            "end": "synthesizer",
+            "continue": "action",
+            "finish": END,
         },
     )
-    workflow.add_edge("tools", "planner") # Loop back to planner after tool use
-    workflow.add_edge("synthesizer", END)
+    
+    # This is the crucial loop from your diagram: Action -> Update -> Generate
+    # The ToolNode ('action') implicitly updates state, and we explicitly loop back to 'generate'
+    workflow.add_edge("action", "generate")
     
     return workflow.compile()

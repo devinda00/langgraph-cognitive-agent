@@ -6,9 +6,18 @@ from duckduckgo_search import DDGS
 def web_search(query: str) -> str:
     """
     Run a web search using DuckDuckGo to get information from the internet.
-    Use this for simple, factual questions.
     """
     print(f"---TOOL: Performing web search for '{query}'---")
     with DDGS() as ddgs:
-        results = [r for r in ddgs.text(query, max_results=5)]
-    return "\n".join(results) if results else "No results found."
+        # Using generator to get results, then formatting them
+        results_gen = ddgs.text(query, max_results=3)
+        results = [r for r in results_gen] if results_gen else []
+        
+    if not results:
+        return "No results found."
+        
+    # Format results for the LLM
+    formatted_results = "\n\n".join(
+        [f"Title: {res['title']}\nSnippet: {res['body']}" for res in results]
+    )
+    return f"Search Results for '{query}':\n\n{formatted_results}"
