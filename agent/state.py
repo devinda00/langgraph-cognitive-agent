@@ -10,7 +10,7 @@ class MindAction(BaseModel):
     action: str = Field(description="The chosen action. Must be one of: 'respond_to_user', 'call_brain', 'use_mind_tool'.")
     tool_input: Optional[str] = Field(description="The input for the chosen tool, if any.")
 
-class BrainAction(BaseModel):
+class BrainThought(BaseModel):
     """The decision and action from the Brain's think node."""
     reasoning: str = Field(description="The chain of thought leading to the decision.")
     action: str = Field(description="The chosen action. Must be one of: 'access_temp_knowledge', 'access_permanent_knowledge', 'write_to_permanent_knowledge', 'respond_to_mind'.")
@@ -26,6 +26,9 @@ class AgentState(TypedDict):
     # Handle to the vector store for permanent knowledge
     permanent_knowledge: VectorStore
 
-    # Intermediate products of the cognitive loops
-    # These will be specific to either the Mind or Brain's internal state
-    # We will pass them explicitly between nodes instead of putting them all here.
+    # Mind's intermediate state
+    mind_action: MindAction
+
+    # Brain's intermediate state
+    generated_questions: List[str]
+    brain_thought: BrainThought

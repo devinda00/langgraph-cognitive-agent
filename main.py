@@ -26,7 +26,10 @@ async def run_agent():
         initial_state = {
             "messages": [HumanMessage(content=user_input)],
             "temp_knowledge": {},
-            "permanent_knowledge": PERMANENT_KNOWLEDGE
+            "permanent_knowledge": PERMANENT_KNOWLEDGE,
+            "generated_questions": [],
+            "brain_thought": None,
+            "mind_action": None
         }
         
         final_state = None
