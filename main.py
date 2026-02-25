@@ -21,7 +21,7 @@ async def run_agent():
             "generated_question": "",
             "thought": None,
             "escalate_to_brain": False,
-            "knowledge_base": "" # Initialize empty knowledge base
+            "knowledge_base": {} # Initialize as an empty dictionary
         }
         
         final_state = None
