@@ -21,37 +21,36 @@ async def run_agent():
     print("Example simple query: 'Hello, who are you?'")
     print("Example complex query requiring brain: 'Recall your identity.'")
     
-    while True:
-        user_input = input("You: ")
-        if user_input.lower() == 'exit':
-            break
-        
-        # We start the conversation with the user's message and the knowledge stores
-        initial_state = {
-            "messages": [HumanMessage(content=user_input)],
-            "temp_knowledge": {},
-            "permanent_knowledge": PERMANENT_KNOWLEDGE,
-            "generated_questions": [],
-            "brain_thought": None,
-            "mind_action": None
-        }
-        
-        final_state = None
+    # We start the conversation with the knowledge stores
+    initial_state = {
+        "messages": [],
+        "temp_knowledge": {},
+        "permanent_knowledge": PERMANENT_KNOWLEDGE,
+        "generated_questions": [],
+        "brain_thought": None,
+        "mind_action": None
+    }
+    
+    config = {"recursion_limit": 1000}
+    
+    try:
         # The 'stream' method lets us see the output from each step
-        async for step in app.astream(initial_state):
+        async for step in app.astream(initial_state, config):
             step_name = list(step.keys())[0]
             final_state = step[step_name]
             
             print(f"\n---> Executing Step: {step_name} <---")
             print("Full State:", final_state)
 
-
-        print("\n---FINAL RESPONSE---")
-        if final_state and final_state.get("messages"):
-            final_message = final_state["messages"][-1]
-            if isinstance(final_message, AIMessage):
-                print(f"{final_message.name}: {final_message.content}")
-        print("\n" + "="*50 + "\n")
+            if step_name == "respond_to_user":
+                print("\n---FINAL RESPONSE---")
+                if final_state and final_state.get("messages"):
+                    final_message = final_state["messages"][-1]
+                    if isinstance(final_message, AIMessage):
+                        print(f"{final_message.name}: {final_message.content}")
+                print("\n" + "="*50 + "\n")
+    except KeyboardInterrupt:
+        print("\nExiting Cognitive Agent...")
 
 if __name__ == "__main__":
     asyncio.run(run_agent())

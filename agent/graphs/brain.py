@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage
 from pydantic import BaseModel, Field
 
 
-from agent.state import AgentState, BrainThought
+from agent.state import AgentState, BrainThought, BrainUpdateAction
 from agent.tools.brain_tools import (
     access_temp_knowledge, 
     access_permanent_knowledge, 
@@ -20,10 +20,14 @@ class GeneratedQuestions(BaseModel):
 
 # --- LLMs and Tools ---
 brain_llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-pro",
-    temperature=1,
-    convert_system_message_to_human=True
+    model="gemini-2.5-flash",
+    temperature=1
 )
+
+brain_update_llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash-lite",
+    temperature=0.0
+).with_structured_output(BrainUpdateAction)
 
 brain_tools = [access_temp_knowledge, access_permanent_knowledge, write_to_permanent_knowledge]
 brain_tool_node = ToolNode(brain_tools)
@@ -36,7 +40,7 @@ async def generate_node(state: AgentState) -> dict:
     
     prompt = f"""
 You are the 'Generate' component of a deep reasoning engine. 
-Your task is to analyze the user's request and the conversation history, then generate a short list of internal questions that need to be answered to provide a complete solution.
+Your task is to analyze the request and the conversation history, then generate a short list of internal questions that need to be answered to provide a complete solution.
 If the previous step was a tool call, use its output to refine your next questions.
 
 Conversation History:
@@ -60,7 +64,7 @@ You have the following actions:
 1.  `access_temp_knowledge`: Retrieve information from short-term memory.
 2.  `access_permanent_knowledge`: Recall long-term memories.
 3.  `write_to_permanent_knowledge`: Save a new insight to long-term memory.
-4.  `respond_to_mind`: The questions have been fully answered. Formulate the final response.
+4.  `respond_to_mind`: The questions have been fully answered or no further actions are possible. Formulate the final response to the Mind and put it in 'tool_input'.
 
 Generated Questions:
 {state['generated_questions']}
@@ -78,14 +82,43 @@ Based on this, what is your reasoning and the single next action to take?
 async def update_node(state: AgentState) -> dict:
     """Step 4: UPDATE. The results of the action are implicitly added to state by the ToolNode."""
     print("---BRAIN LOOP: Update---")
-    # This step is for future logic, like summarizing tool outputs into temp_knowledge.
-    # The ToolNode already adds its raw output to 'messages'.
+    
+    if not state.get('messages'):
+        return {}
+        
+    last_message = state['messages'][-1]
+    
+    prompt = f"""
+You are the "Brain" memory updater. Your job is to extract any new, relevant facts, context, or insights from the latest internal thought or tool result and return them as key-value pairs to store in working memory (temp_knowledge).
+
+Current Temp Knowledge:
+{state.get('temp_knowledge', {})}
+
+Latest Message to Analyze:
+{last_message.content if hasattr(last_message, 'content') else str(last_message)}
+
+Extract key information. If the latest message does not contain any new factual information worth remembering for the short term, return an empty dictionary.
+"""
+    update_action = await brain_update_llm.ainvoke(prompt)
+    
+    if update_action.insights:
+        print(f"---BRAIN Extracted Insights: {update_action.insights}---")
+        # Merge new insights into the existing temp_knowledge dictionary
+        current_knowledge = state.get('temp_knowledge', {})
+        current_knowledge.update(update_action.insights)
+        return {"temp_knowledge": current_knowledge}
+    
     return {}
 
 async def respond_to_mind_node(state: AgentState) -> dict:
     """The final node, packaging the result for the Mind."""
     print("---BRAIN LOOP: Respond to Mind---")
-    return {"messages": [AIMessage(content=state['brain_thought'].tool_input, name="Brain")]}
+    
+    response_content = state['brain_thought'].tool_input
+    if not response_content:
+        response_content = "I have completed my reasoning but did not formulate a specific response."
+        
+    return {"messages": [AIMessage(content=response_content, name="Brain")]}
 
 # --- Conditional Router for the Brain ---
 
