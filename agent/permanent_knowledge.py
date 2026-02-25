@@ -1,7 +1,7 @@
 # langgraph_cognitive_arch/agent/permanent_knowledge.py
 from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain.schema import Document
+from langchain_core.documents import Document
 import os
 
 class VectorStore:
