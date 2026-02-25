@@ -1,5 +1,5 @@
 # langgraph_cognitive_arch/agent/permanent_knowledge.py
-from langchain_community.vectorstores.memory import MemoryVectorStore
+from langchain_community.vectorstores import MemoryVectorStore
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.schema import Document
 import os
