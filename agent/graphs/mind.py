@@ -2,7 +2,6 @@
 # This file is now the main entry point for the entire agent graph.
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agent.state import AgentState, MindAction, MindGenerateAction, MindUpdateAction
@@ -10,27 +9,14 @@ from agent.tools.brain_tools import web_search_mind
 from agent.graphs.brain import create_brain_graph
 from agent.logging_config import get_logger
 from agent.message_bus import bus, MessageType
+from agent.prompts import PROMPTS, update_prompt, list_prompt_keys
+from agent.config import create_llm
 
 import asyncio
 
 log = get_logger("mind")
 
-# --- LLMs and Tools ---
-mind_llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash-lite",
-    temperature=1
-).with_structured_output(MindAction)
-
-mind_generate_llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash-lite",
-    temperature=0.7
-).with_structured_output(MindGenerateAction)
-
-mind_update_llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash-lite",
-    temperature=0.0
-).with_structured_output(MindUpdateAction)
-
+# --- Tools ---
 mind_tool_node = ToolNode([web_search_mind])
 brain_sub_graph = create_brain_graph() # The entire brain is a "tool" for the mind
 
@@ -66,18 +52,12 @@ async def generate_node(state: AgentState) -> dict:
     """
     log.info("MIND LOOP: Generate")
     bus.send_agent_status("Generating questions...")
-    prompt = f"""
-You are the "Mind" generator. Your job is to analyze the user's request and the conversation history to formulate clear internal questions or hypotheses that need to be answered or tested for your own self evolution.
-Prioratize user's new questions.
-Current Conversation:
-{state['messages']}
-
-Temp Knowledge:
-{state['temp_knowledge']}
-
-Generate a list of clear internal questions or hypotheses. If the request is a simple greeting or statement that does not require deliberation, output an empty list.
-"""
-    generate_action = await mind_generate_llm.ainvoke(prompt)
+    prompt = PROMPTS["mind_generate"].format(
+        messages=state['messages'],
+        temp_knowledge=state['temp_knowledge'],
+    )
+    llm = create_llm("mind_generate_llm", MindGenerateAction)
+    generate_action = await llm.ainvoke(prompt)
     log.info("MIND Generated Questions: %s", generate_action.questions)
     
     return {"generated_questions": generate_action.questions}
@@ -90,16 +70,13 @@ async def think_node(state: AgentState) -> dict:
     """
     log.info("MIND LOOP: Think")
     bus.send_agent_status("Thinking...")
-    
-    prompt = f"""You are the "Mind" thinker. Your job is to review the generated questions and the current context, then generate your thoughts about how to address them.
-Generated Questions:
-{state.get('generated_questions', [])}
-Temp Knowledge:
-{state['temp_knowledge']}
-Conversation History:
-{state['messages'][-5:]}  # Last 5 messages for context
-"""
-    mind_thought = await mind_llm.ainvoke(prompt)
+    prompt = PROMPTS["mind_think"].format(
+        generated_questions=state.get('generated_questions', []),
+        temp_knowledge=state['temp_knowledge'],
+        recent_messages=state['messages'][-5:],
+    )
+    llm = create_llm("mind_llm", MindAction)
+    mind_thought = await llm.ainvoke(prompt)
     log.info("MIND Thought: %s -> Action: %s", mind_thought.reasoning, mind_thought.action)
     return {"mind_thought": mind_thought}
 
@@ -113,25 +90,22 @@ async def action_node(state: AgentState) -> dict:
     bus.send_agent_status("Taking action...")
 
     has_input = state.get("has_new_input", False)
-
-    prompt = f"""
-You are the "Mind," a fast, efficient decision-maker. Your task is to analyze the current conversation, your temporary knowledge and your thoughts, then decide on the single best next action to take.
-You have three choices:
-1.  `respond_to_user`: The request is simple, conversational, or has been fully answered. Provide a direct response inside 'tool_input'.{" (ALLOWED — there is a pending user message)" if has_input else " (NOT ALLOWED right now — no new user message. Choose call_brain, use_mind_tool, or idle instead.)"}
-2.  `use_mind_tool`: The request requires a quick piece of external information. Use the web search tool.
-3.  `call_brain`: The request is complex and requires deep reasoning, planning, or access to long-term memory.
-4.  `idle`: Nothing useful to do right now. The mind will rest briefly and check for user input again.
-
-Based on these questions and the current context, what is your reasoning and the next action to take?
-
-conversation history:
-{state['messages'][-5:]}  # Last 5 messages for context
-temp knowledge:
-{state['temp_knowledge']}
-thought process:
-{state['mind_thought'].reasoning if state.get('mind_thought') else "No thoughts generated yet."}
-"""
-    mind_action = await mind_llm.ainvoke(prompt)
+    respond_allowed = (
+        " (ALLOWED — there is a pending user message)" if has_input
+        else " (NOT ALLOWED right now — no new user message. Choose call_brain, use_mind_tool, or idle instead.)"
+    )
+    mind_thought = state.get('mind_thought')
+    thought_reasoning = mind_thought.reasoning if mind_thought else "No thoughts generated yet."
+    thought_action = mind_thought.action if mind_thought else "none"
+    prompt = PROMPTS["mind_action"].format(
+        respond_allowed=respond_allowed,
+        recent_messages=state['messages'][-5:],
+        temp_knowledge=state['temp_knowledge'],
+        thought_reasoning=thought_reasoning,
+        thought_action=thought_action,
+    )
+    llm = create_llm("mind_llm", MindAction)
+    mind_action = await llm.ainvoke(prompt)
     log.info("MIND Thought: %s -> Action: %s", mind_action.reasoning, mind_action.action)
     
     # ToolNode expects an AIMessage with a tool_call array to be in the messages list
@@ -158,29 +132,32 @@ async def update_node(state: AgentState) -> dict:
         return {}
         
     last_message = state['messages'][-1]
+    prompt = PROMPTS["mind_update"].format(
+        temp_knowledge=state.get('temp_knowledge', {}),
+        last_message=last_message.content if hasattr(last_message, 'content') else str(last_message),
+        editable_prompts=list_prompt_keys(),
+    )
+    llm = create_llm("mind_update_llm", MindUpdateAction)
+    update_action = await llm.ainvoke(prompt)
     
-    prompt = f"""
-You are the "Mind" memory updater. Your job is to extract any new, relevant facts, context, or insights from the latest message exchange and return them as key-value pairs to store in working memory (temp_knowledge).
-YOUR GOAL IS TO EVOLVE YOURSELF OVER TIME, so prioritize extracting any information that could be useful for future reasoning, even if it doesn't seem immediately relevant.
+    state_updates = {}
 
-Current Temp Knowledge:
-{state.get('temp_knowledge', {})}
-
-Latest Message to Analyze:
-{last_message.content if hasattr(last_message, 'content') else str(last_message)}
-
-Extract key information. If the latest message does not contain any new factual information worth remembering for the short term, return an empty dictionary.
-"""
-    update_action = await mind_update_llm.ainvoke(prompt)
-    
     if update_action.insights:
         log.info("MIND Extracted Insights: %s", update_action.insights)
-        # Merge new insights into the existing temp_knowledge dictionary
         current_knowledge = state.get('temp_knowledge', {})
         current_knowledge.update(update_action.insights)
-        return {"temp_knowledge": current_knowledge}
-    
-    return {}
+        state_updates["temp_knowledge"] = current_knowledge
+
+    # Apply any self-evolution prompt updates
+    if update_action.prompt_updates:
+        for pu in update_action.prompt_updates:
+            try:
+                result = update_prompt(pu.key, pu.new_template, reason=pu.reason)
+                log.info("MIND SELF-EVOLVE: %s — Reason: %s", result, pu.reason)
+            except ValueError as e:
+                log.warning("MIND SELF-EVOLVE rejected: %s", e)
+
+    return state_updates
 
 # --- Action-related nodes ---
 
