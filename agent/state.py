@@ -15,7 +15,7 @@ class MindUpdateAction(BaseModel):
 class MindAction(BaseModel):
     """The decision and action from the Mind's think node."""
     reasoning: str = Field(description="The chain of thought leading to the decision.")
-    action: str = Field(description="The chosen action. Must be one of: 'respond_to_user', 'call_brain', 'use_mind_tool'.")
+    action: str = Field(description="The chosen action. Must be one of: 'respond_to_user', 'call_brain', 'use_mind_tool', 'idle'.")
     tool_input: Optional[str] = Field(description="The input for the chosen tool, or the direct text response to the user if the action is 'respond_to_user'.")
 
 class BrainThought(BaseModel):
@@ -37,6 +37,9 @@ class AgentState(TypedDict):
     
     # Handle to the vector store for permanent knowledge
     permanent_knowledge: VectorStore
+
+    # Whether the current loop iteration was triggered by new user input
+    has_new_input: bool
 
     # Mind's intermediate state
     mind_action: MindAction
