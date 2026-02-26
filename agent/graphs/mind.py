@@ -82,34 +82,54 @@ Generate a list of clear internal questions or hypotheses. If the request is a s
     
     return {"generated_questions": generate_action.questions}
 
+
 async def think_node(state: AgentState) -> dict:
     """
     Step 3: THINK
-    The core of the Mind. It analyzes the situation and decides on an action.
+    Reviews the generated questions and decides on the next single action.
     """
     log.info("MIND LOOP: Think")
     bus.send_agent_status("Thinking...")
+    
+    prompt = f"""You are the "Mind" thinker. Your job is to review the generated questions and the current context, then generate your thoughts about how to address them.
+Generated Questions:
+{state.get('generated_questions', [])}
+Temp Knowledge:
+{state['temp_knowledge']}
+Conversation History:
+{state['messages'][-5:]}  # Last 5 messages for context
+"""
+    mind_thought = await mind_llm.ainvoke(prompt)
+    log.info("MIND Thought: %s -> Action: %s", mind_thought.reasoning, mind_thought.action)
+    return {"mind_thought": mind_thought}
+
+
+async def action_node(state: AgentState) -> dict:
+    """
+    Step 3: ACTION
+    The core of the Mind. It analyzes the situation and decides on an action.
+    """
+    log.info("MIND LOOP: Action")
+    bus.send_agent_status("Taking action...")
 
     has_input = state.get("has_new_input", False)
 
     prompt = f"""
-You are the "Mind," a fast, efficient AI controller. Your job is to analyze the these questions and decide the next action. Try to self evolve by learing from the user and the world.
+You are the "Mind," a fast, efficient decision-maker. Your task is to analyze the current conversation, your temporary knowledge and your thoughts, then decide on the single best next action to take.
 You have three choices:
 1.  `respond_to_user`: The request is simple, conversational, or has been fully answered. Provide a direct response inside 'tool_input'.{" (ALLOWED — there is a pending user message)" if has_input else " (NOT ALLOWED right now — no new user message. Choose call_brain, use_mind_tool, or idle instead.)"}
 2.  `use_mind_tool`: The request requires a quick piece of external information. Use the web search tool.
 3.  `call_brain`: The request is complex and requires deep reasoning, planning, or access to long-term memory.
 4.  `idle`: Nothing useful to do right now. The mind will rest briefly and check for user input again.
 
-Current Conversation:
-{state['messages']}
-
-Generated Questions to Address:
-{state.get('generated_questions', [])}
-
-Temp Knowledge:
-{state['temp_knowledge']}
-
 Based on these questions and the current context, what is your reasoning and the next action to take?
+
+conversation history:
+{state['messages'][-5:]}  # Last 5 messages for context
+temp knowledge:
+{state['temp_knowledge']}
+thought process:
+{state['mind_thought'].reasoning if state.get('mind_thought') else "No thoughts generated yet."}
 """
     mind_action = await mind_llm.ainvoke(prompt)
     log.info("MIND Thought: %s -> Action: %s", mind_action.reasoning, mind_action.action)
@@ -141,6 +161,7 @@ async def update_node(state: AgentState) -> dict:
     
     prompt = f"""
 You are the "Mind" memory updater. Your job is to extract any new, relevant facts, context, or insights from the latest message exchange and return them as key-value pairs to store in working memory (temp_knowledge).
+YOUR GOAL IS TO EVOLVE YOURSELF OVER TIME, so prioritize extracting any information that could be useful for future reasoning, even if it doesn't seem immediately relevant.
 
 Current Temp Knowledge:
 {state.get('temp_knowledge', {})}
@@ -205,6 +226,7 @@ def create_agent_graph():
     workflow.add_node("load", load_node)
     workflow.add_node("generate", generate_node)
     workflow.add_node("think", think_node)
+    workflow.add_node("action", action_node)
     
     # Action nodes
     workflow.add_node("mind_tools", mind_tool_node)
@@ -217,10 +239,10 @@ def create_agent_graph():
     workflow.set_entry_point("load")
     workflow.add_edge("load", "generate")
     workflow.add_edge("generate", "think")
-    
+    workflow.add_edge("think", "action")
     # The Action router
     workflow.add_conditional_edges(
-        "think",
+        "action",
         route_action,
         {
             "mind_tools": "mind_tools",
